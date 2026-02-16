@@ -1,0 +1,524 @@
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Калькулятор себестоимости МКД + стресс-модель</title>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#121a33; --muted:#9aa7c7; --text:#e9eeff;
+      --ok:#2dd4bf; --warn:#fbbf24; --bad:#fb7185; --line:#243055; --accent:#60a5fa;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    }
+    body{margin:0;background:linear-gradient(120deg,#070a14,#0b1020 40%, #070a14);color:var(--text);font-family:var(--sans);}
+    .wrap{max-width:1200px;margin:28px auto;padding:0 16px;}
+    h1{font-size:20px;margin:0 0 10px;}
+    p.sub{margin:0 0 18px;color:var(--muted);font-size:13px;line-height:1.4;}
+    .grid{display:grid;grid-template-columns: 1.1fr 0.9fr;gap:14px;}
+    @media (max-width: 980px){ .grid{grid-template-columns:1fr;} }
+    .card{background:rgba(18,26,51,.85);border:1px solid rgba(96,165,250,.18);border-radius:14px;padding:14px 14px 10px;box-shadow:0 8px 24px rgba(0,0,0,.25);}
+    .card h2{font-size:14px;margin:0 0 10px;color:#cfe0ff;letter-spacing:.2px;}
+    .row{display:grid;grid-template-columns: 1.3fr 1fr;gap:10px;margin-bottom:10px;align-items:center;}
+    .row label{font-size:12px;color:var(--muted);}
+    input, select{
+      width:100%; box-sizing:border-box; padding:10px 10px; border-radius:10px;
+      border:1px solid rgba(154,167,199,.25); background:#0b1229; color:var(--text);
+      outline:none;
+    }
+    input:focus, select:focus{border-color:rgba(96,165,250,.6); box-shadow:0 0 0 3px rgba(96,165,250,.15);}
+    .small{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.35;}
+    .hr{height:1px;background:linear-gradient(90deg,transparent,var(--line),transparent);margin:10px 0 12px;}
+    table{width:100%;border-collapse:collapse;font-size:12px;}
+    th, td{padding:9px 8px;border-bottom:1px solid rgba(36,48,85,.7);vertical-align:middle;}
+    th{color:#cfe0ff;text-align:left;font-weight:600;}
+    td.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;}
+    .pill{display:inline-flex;gap:6px;align-items:center;font-size:11px;padding:6px 10px;border-radius:999px;border:1px solid rgba(154,167,199,.25);color:var(--muted);}
+    .dot{width:8px;height:8px;border-radius:50%;}
+    .dot.ok{background:var(--ok);}
+    .dot.warn{background:var(--warn);}
+    .dot.bad{background:var(--bad);}
+    .kpi{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;}
+    @media (max-width: 560px){ .kpi{grid-template-columns:1fr;} }
+    .k{border:1px solid rgba(154,167,199,.18);border-radius:12px;padding:10px;background:rgba(11,18,41,.6);}
+    .k .t{font-size:11px;color:var(--muted);margin-bottom:6px;}
+    .k .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:15px;}
+    .k .s{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.35;}
+    .flags{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+    .rightcol{display:grid;gap:14px;}
+    .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;}
+    button{
+      cursor:pointer;border:1px solid rgba(96,165,250,.35);background:rgba(96,165,250,.15);
+      color:var(--text);padding:10px 12px;border-radius:12px;font-size:12px;
+    }
+    button:hover{background:rgba(96,165,250,.22);}
+    button.secondary{border-color:rgba(154,167,199,.25);background:rgba(154,167,199,.10);color:var(--text);}
+    .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4;}
+    .stress{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    @media (max-width: 720px){ .stress{grid-template-columns:1fr;} }
+    .badge{
+      display:inline-block; padding:3px 8px; border-radius:999px; font-size:11px;
+      border:1px solid rgba(154,167,199,.25); color:var(--muted);
+    }
+    .deltaPos{color:var(--ok);}
+    .deltaNeg{color:var(--bad);}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Калькулятор себестоимости строительства МКД (SPV + взаимозависимый ГП) + стресс-модель</h1>
+    <p class="sub">
+      Вводите площади, цену реализации и структуру затрат (в руб/м² и фикс.). Модель считает СМР, CAPEX, маржу ГП и девелопера.
+      Стресс-модель позволяет менять % изменения цены и СМР (по умолчанию: −10% к цене и +15% к СМР).
+    </p>
+
+    <div class="grid">
+      <!-- LEFT: INPUTS -->
+      <div class="card">
+        <h2>1) Исходные данные</h2>
+
+        <div class="row">
+          <label for="gba">Общая площадь (GBA), м²</label>
+          <input id="gba" type="number" min="0" step="1" value="20000">
+        </div>
+        <div class="row">
+          <label for="nsa">Продаваемая площадь (NSA), м²</label>
+          <input id="nsa" type="number" min="0" step="1" value="14000">
+        </div>
+        <div class="row">
+          <label for="price">Цена реализации, ₽/м² NSA</label>
+          <input id="price" type="number" min="0" step="100" value="140000">
+        </div>
+
+        <div class="hr"></div>
+        <h2>2) Прямые затраты СМР (руб/м² GBA) + фикс.</h2>
+
+        <div class="row">
+          <label for="c_structure">Конструктив (каркас/монолит/панель), ₽/м²</label>
+          <input id="c_structure" type="number" min="0" step="10" value="21000">
+        </div>
+        <div class="row">
+          <label for="c_facade">Фасады, ₽/м²</label>
+          <input id="c_facade" type="number" min="0" step="10" value="6500">
+        </div>
+        <div class="row">
+          <label for="c_mep">Инженерия (ОВ/ВК/ЭОМ/СС), ₽/м²</label>
+          <input id="c_mep" type="number" min="0" step="10" value="12000">
+        </div>
+        <div class="row">
+          <label for="c_finish">Отделка (МОП/квартиры), ₽/м²</label>
+          <input id="c_finish" type="number" min="0" step="10" value="8000">
+        </div>
+        <div class="row">
+          <label for="c_landscape">Благоустройство/внутриплощадочные сети, ₽/м²</label>
+          <input id="c_landscape" type="number" min="0" step="10" value="3500">
+        </div>
+        <div class="row">
+          <label for="c_other">Прочие прямые, ₽/м²</label>
+          <input id="c_other" type="number" min="0" step="10" value="2500">
+        </div>
+        <div class="row">
+          <label for="fixed_lifts">Лифты и фикс. поставки, ₽</label>
+          <input id="fixed_lifts" type="number" min="0" step="100000" value="45000000">
+        </div>
+
+        <div class="hr"></div>
+        <h2>3) Накладные, прибыль ГП и резерв</h2>
+
+        <div class="row">
+          <label for="overhead_pct">Накладные ГП, % от прямых</label>
+          <input id="overhead_pct" type="number" step="0.1" value="10">
+        </div>
+        <div class="row">
+          <label for="gp_profit_pct">Прибыль ГП, % от (прямые+накладные)</label>
+          <input id="gp_profit_pct" type="number" step="0.1" value="5">
+        </div>
+        <div class="row">
+          <label for="reserve_pct">Резерв/риски, % от СМР</label>
+          <input id="reserve_pct" type="number" step="0.1" value="2">
+        </div>
+
+        <div class="hr"></div>
+        <h2>4) Прочие затраты девелопера (не СМР)</h2>
+
+        <div class="row">
+          <label for="dev_other">Земля/ТУ/проектирование/страхование/технадзор/комиссии, ₽</label>
+          <input id="dev_other" type="number" min="0" step="100000" value="320000000">
+        </div>
+
+        <div class="btns">
+          <button id="btnDemo">Заполнить демо-параметры</button>
+          <button class="secondary" id="btnReset">Сбросить</button>
+        </div>
+
+        <div class="note">
+          Примечание: это управленческий калькулятор (не нормативная смета). Для банка обычно добавляют поквартальную/помесячную разбивку CAPEX и подтверждение рыночности цен.
+        </div>
+      </div>
+
+      <!-- RIGHT: RESULTS -->
+      <div class="rightcol">
+        <div class="card">
+          <h2>Результаты (база)</h2>
+
+          <table>
+            <tbody>
+              <tr><th colspan="2">СМР</th></tr>
+              <tr><td>Прямые затраты СМР</td><td class="num" id="r_direct">—</td></tr>
+              <tr><td>Накладные ГП</td><td class="num" id="r_overhead">—</td></tr>
+              <tr><td>Прибыль ГП</td><td class="num" id="r_gp_profit">—</td></tr>
+              <tr><td>Резерв/риски</td><td class="num" id="r_reserve">—</td></tr>
+              <tr><td><b>Итого СМР</b></td><td class="num" id="r_smr_total"><b>—</b></td></tr>
+
+              <tr><th colspan="2">CAPEX / Выручка / Маржа</th></tr>
+              <tr><td>Прочие затраты девелопера</td><td class="num" id="r_dev_other">—</td></tr>
+              <tr><td><b>Итого CAPEX</b></td><td class="num" id="r_capex"><b>—</b></td></tr>
+              <tr><td>Выручка (NSA × цена)</td><td class="num" id="r_revenue">—</td></tr>
+              <tr><td>Профит девелопера (Выручка − CAPEX)</td><td class="num" id="r_dev_profit">—</td></tr>
+              <tr><td>Консолид. профит группы (Выручка − (прямые+накладные+прочие дев))</td><td class="num" id="r_group_profit">—</td></tr>
+            </tbody>
+          </table>
+
+          <div class="kpi">
+            <div class="k">
+              <div class="t">СМР, ₽/м² GBA</div>
+              <div class="v" id="k_smr_m2">—</div>
+              <div class="s">Контроль: если СМР слишком близко к цене реализации — низкий запас устойчивости.</div>
+            </div>
+            <div class="k">
+              <div class="t">CAPEX, ₽/м² NSA</div>
+              <div class="v" id="k_capex_nsa">—</div>
+              <div class="s">Удобно сравнивать с ценой реализации (₽/м² NSA).</div>
+            </div>
+            <div class="k">
+              <div class="t">Накладные ГП, %</div>
+              <div class="v" id="k_overhead_pct">—</div>
+              <div class="s">Практика: 8–12% обычно ок; выше — требует объяснения.</div>
+            </div>
+            <div class="k">
+              <div class="t">Прибыль ГП, %</div>
+              <div class="v" id="k_gp_pct">—</div>
+              <div class="s">Внутригрупповой ГП: часто 3–7% (зависит от проекта/рисков).</div>
+            </div>
+          </div>
+
+          <div class="flags" id="flagsBase"></div>
+        </div>
+
+        <div class="card">
+          <h2>Стресс-модель <span class="badge">изменяемые параметры</span></h2>
+
+          <div class="stress">
+            <div>
+              <div class="row">
+                <label for="stress_price_pct">Изменение цены, % (например −10)</label>
+                <input id="stress_price_pct" type="number" step="0.1" value="-10">
+              </div>
+              <div class="small">Применяется к цене реализации (₽/м² NSA).</div>
+            </div>
+            <div>
+              <div class="row">
+                <label for="stress_smr_pct">Изменение СМР, % (например +15)</label>
+                <input id="stress_smr_pct" type="number" step="0.1" value="15">
+              </div>
+              <div class="small">Применяется к СМР (прямые+фикс), затем пересчитываются накладные/прибыль/резерв.</div>
+            </div>
+          </div>
+
+          <div class="hr"></div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Показатель</th>
+                <th class="num">База</th>
+                <th class="num">Стресс</th>
+                <th class="num">Δ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Выручка</td>
+                <td class="num" id="s_rev_base">—</td>
+                <td class="num" id="s_rev_stress">—</td>
+                <td class="num" id="s_rev_delta">—</td>
+              </tr>
+              <tr>
+                <td>Итого СМР</td>
+                <td class="num" id="s_smr_base">—</td>
+                <td class="num" id="s_smr_stress">—</td>
+                <td class="num" id="s_smr_delta">—</td>
+              </tr>
+              <tr>
+                <td>Итого CAPEX</td>
+                <td class="num" id="s_capex_base">—</td>
+                <td class="num" id="s_capex_stress">—</td>
+                <td class="num" id="s_capex_delta">—</td>
+              </tr>
+              <tr>
+                <td><b>Профит девелопера</b></td>
+                <td class="num" id="s_profit_base"><b>—</b></td>
+                <td class="num" id="s_profit_stress"><b>—</b></td>
+                <td class="num" id="s_profit_delta"><b>—</b></td>
+              </tr>
+              <tr>
+                <td>Консолид. профит группы</td>
+                <td class="num" id="s_gprofit_base">—</td>
+                <td class="num" id="s_gprofit_stress">—</td>
+                <td class="num" id="s_gprofit_delta">—</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="flags" id="flagsStress"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ---------- helpers ----------
+  const $ = (id) => document.getElementById(id);
+
+  function n(v){ // safe number
+    const x = Number(v);
+    return Number.isFinite(x) ? x : 0;
+  }
+
+  function rub(x){
+    // формат ₽ с разделителями, без копеек (управленческий уровень)
+    const v = Math.round(n(x));
+    return v.toLocaleString('ru-RU') + ' ₽';
+  }
+
+  function rub2(x){
+    // формат ₽/м²
+    const v = Math.round(n(x));
+    return v.toLocaleString('ru-RU') + ' ₽/м²';
+  }
+
+  function pct(x){
+    return (Math.round(n(x)*10)/10).toLocaleString('ru-RU') + ' %';
+  }
+
+  function setDelta(el, delta){
+    const d = n(delta);
+    el.textContent = rub(d);
+    el.classList.remove('deltaPos','deltaNeg');
+    if (d > 0) el.classList.add('deltaPos');
+    if (d < 0) el.classList.add('deltaNeg');
+  }
+
+  function pill(type, text){
+    const div = document.createElement('div');
+    div.className = 'pill';
+    const dot = document.createElement('span');
+    dot.className = 'dot ' + type;
+    const t = document.createElement('span');
+    t.textContent = text;
+    div.appendChild(dot);
+    div.appendChild(t);
+    return div;
+  }
+
+  // ---------- core calc ----------
+  function calcScenario({priceMul=1, smrMul=1}={}){
+    // inputs
+    const gba = n($('gba').value);
+    const nsa = n($('nsa').value);
+    const price = n($('price').value) * priceMul;
+
+    // per m2 direct costs
+    const c_structure = n($('c_structure').value);
+    const c_facade = n($('c_facade').value);
+    const c_mep = n($('c_mep').value);
+    const c_finish = n($('c_finish').value);
+    const c_landscape = n($('c_landscape').value);
+    const c_other = n($('c_other').value);
+    const fixed_lifts = n($('fixed_lifts').value);
+
+    // percentages
+    const overhead_pct = n($('overhead_pct').value) / 100;
+    const gp_profit_pct = n($('gp_profit_pct').value) / 100;
+    const reserve_pct = n($('reserve_pct').value) / 100;
+
+    // dev other
+    const dev_other = n($('dev_other').value);
+
+    // direct SMR base components
+    const directPerM2 = c_structure + c_facade + c_mep + c_finish + c_landscape + c_other;
+    // apply smr multiplier to direct part AND fixed lifts
+    const direct = (directPerM2 * gba + fixed_lifts) * smrMul;
+
+    const overhead = direct * overhead_pct;
+    const gpProfitBase = direct + overhead;
+    const gp_profit = gpProfitBase * gp_profit_pct;
+    const smrBeforeReserve = direct + overhead + gp_profit;
+    const reserve = smrBeforeReserve * reserve_pct;
+
+    const smr_total = smrBeforeReserve + reserve;
+    const capex = smr_total + dev_other;
+
+    const revenue = nsa * price;
+    const dev_profit = revenue - capex;
+
+    const group_profit = revenue - (direct + overhead + dev_other); // консолид. прибыль группы (без "внутригрупповой" прибыли ГП)
+    // NOTE: gp_profit тут внутри группы — перераспределение (учтена в capex SPV, но не в group_profit)
+
+    return {
+      gba, nsa, price,
+      overhead_pct, gp_profit_pct,
+      direct, overhead, gp_profit, reserve, smr_total,
+      dev_other, capex, revenue, dev_profit, group_profit
+    };
+  }
+
+  function render(){
+    const base = calcScenario();
+
+    // base table
+    $('r_direct').textContent = rub(base.direct);
+    $('r_overhead').textContent = rub(base.overhead);
+    $('r_gp_profit').textContent = rub(base.gp_profit);
+    $('r_reserve').textContent = rub(base.reserve);
+    $('r_smr_total').textContent = rub(base.smr_total);
+
+    $('r_dev_other').textContent = rub(base.dev_other);
+    $('r_capex').textContent = rub(base.capex);
+    $('r_revenue').textContent = rub(base.revenue);
+    $('r_dev_profit').textContent = rub(base.dev_profit);
+    $('r_group_profit').textContent = rub(base.group_profit);
+
+    // KPI
+    const smr_m2 = base.gba > 0 ? base.smr_total / base.gba : 0;
+    const capex_nsa = base.nsa > 0 ? base.capex / base.nsa : 0;
+
+    $('k_smr_m2').textContent = rub2(smr_m2);
+    $('k_capex_nsa').textContent = rub2(capex_nsa);
+    $('k_overhead_pct').textContent = pct(base.overhead_pct*100);
+    $('k_gp_pct').textContent = pct(base.gp_profit_pct*100);
+
+    // base flags
+    const flagsBase = $('flagsBase');
+    flagsBase.innerHTML = '';
+
+    // controls (примитивные, но полезные)
+    // 1) overhead thresholds
+    const oh = base.overhead_pct*100;
+    if (oh <= 12) flagsBase.appendChild(pill('ok', `Накладные ГП ${pct(oh)} — в типовом диапазоне`));
+    else if (oh <= 15) flagsBase.appendChild(pill('warn', `Накладные ГП ${pct(oh)} — повышены, нужна расшифровка`));
+    else flagsBase.appendChild(pill('bad', `Накладные ГП ${pct(oh)} — риск для банка/маржи`));
+
+    // 2) gp profit thresholds
+    const gpp = base.gp_profit_pct*100;
+    if (gpp <= 7) flagsBase.appendChild(pill('ok', `Прибыль ГП ${pct(gpp)} — обычно приемлемо`));
+    else if (gpp <= 10) flagsBase.appendChild(pill('warn', `Прибыль ГП ${pct(gpp)} — вероятны вопросы банка`));
+    else flagsBase.appendChild(pill('bad', `Прибыль ГП ${pct(gpp)} — высоко для взаимозависимых лиц`));
+
+    // 3) dev profit sign
+    if (base.dev_profit > 0) flagsBase.appendChild(pill('ok', `Проект в плюсе на уровне SPV (профит девелопера положительный)`));
+    else flagsBase.appendChild(pill('bad', `Проект убыточен на уровне SPV (проверьте цену/СМР/прочие затраты)`));
+
+    // 4) buffer: capex per nsa vs price
+    const price = base.price;
+    const buffer = price - capex_nsa;
+    if (buffer > 25000) flagsBase.appendChild(pill('ok', `Запас к цене: ~${rub2(buffer)} (на 1 м² NSA)`));
+    else if (buffer > 10000) flagsBase.appendChild(pill('warn', `Низкий запас к цене: ~${rub2(buffer)} (на 1 м² NSA)`));
+    else flagsBase.appendChild(pill('bad', `Критически низкий запас к цене: ~${rub2(buffer)} (на 1 м² NSA)`));
+
+    // -------- stress --------
+    const stressPricePct = n($('stress_price_pct').value) / 100;
+    const stressSmrPct = n($('stress_smr_pct').value) / 100;
+
+    const stress = calcScenario({
+      priceMul: 1 + stressPricePct,
+      smrMul: 1 + stressSmrPct
+    });
+
+    // fill stress comparison
+    $('s_rev_base').textContent = rub(base.revenue);
+    $('s_rev_stress').textContent = rub(stress.revenue);
+    setDelta($('s_rev_delta'), stress.revenue - base.revenue);
+
+    $('s_smr_base').textContent = rub(base.smr_total);
+    $('s_smr_stress').textContent = rub(stress.smr_total);
+    setDelta($('s_smr_delta'), stress.smr_total - base.smr_total);
+
+    $('s_capex_base').textContent = rub(base.capex);
+    $('s_capex_stress').textContent = rub(stress.capex);
+    setDelta($('s_capex_delta'), stress.capex - base.capex);
+
+    $('s_profit_base').textContent = rub(base.dev_profit);
+    $('s_profit_stress').textContent = rub(stress.dev_profit);
+    setDelta($('s_profit_delta'), stress.dev_profit - base.dev_profit);
+
+    $('s_gprofit_base').textContent = rub(base.group_profit);
+    $('s_gprofit_stress').textContent = rub(stress.group_profit);
+    setDelta($('s_gprofit_delta'), stress.group_profit - base.group_profit);
+
+    // stress flags
+    const flagsStress = $('flagsStress');
+    flagsStress.innerHTML = '';
+
+    if (stress.dev_profit > 0) flagsStress.appendChild(pill('ok', `Стресс: проект остаётся прибыльным на уровне SPV`));
+    else flagsStress.appendChild(pill('bad', `Стресс: проект уходит в убыток на уровне SPV`));
+
+    // show stress params
+    const sp = stressPricePct*100;
+    const ss = stressSmrPct*100;
+    flagsStress.appendChild(pill('warn', `Параметры стресса: цена ${pct(sp)}, СМР ${pct(ss)}`));
+
+    // margin compression check: buffer per m2 nsa in stress
+    const capex_nsa_s = stress.nsa > 0 ? stress.capex / stress.nsa : 0;
+    const buffer_s = stress.price - capex_nsa_s;
+    if (buffer_s > 25000) flagsStress.appendChild(pill('ok', `Запас к цене в стрессе: ~${rub2(buffer_s)} (на 1 м² NSA)`));
+    else if (buffer_s > 10000) flagsStress.appendChild(pill('warn', `Низкий запас к цене в стрессе: ~${rub2(buffer_s)} (на 1 м² NSA)`));
+    else flagsStress.appendChild(pill('bad', `Критически низкий запас к цене в стрессе: ~${rub2(buffer_s)} (на 1 м² NSA)`));
+
+    // sanity checks
+    if (base.nsa <= 0 || base.gba <= 0){
+      flagsBase.appendChild(pill('bad', 'Проверьте площади: GBA и NSA должны быть > 0'));
+    }
+    if (base.nsa > base.gba){
+      flagsBase.appendChild(pill('warn', 'NSA больше GBA — обычно так не бывает. Проверьте ввод.'));
+    }
+  }
+
+  // bind events
+  const inputs = document.querySelectorAll('input, select');
+  inputs.forEach(i => i.addEventListener('input', render));
+
+  $('btnDemo').addEventListener('click', () => {
+    $('gba').value = 24000;
+    $('nsa').value = 16800;
+    $('price').value = 145000;
+
+    $('c_structure').value = 22500;
+    $('c_facade').value = 7000;
+    $('c_mep').value = 12500;
+    $('c_finish').value = 8500;
+    $('c_landscape').value = 3800;
+    $('c_other').value = 2600;
+    $('fixed_lifts').value = 52000000;
+
+    $('overhead_pct').value = 10;
+    $('gp_profit_pct').value = 5;
+    $('reserve_pct').value = 2;
+
+    $('dev_other').value = 360000000;
+
+    $('stress_price_pct').value = -10;
+    $('stress_smr_pct').value = 15;
+
+    render();
+  });
+
+  $('btnReset').addEventListener('click', () => {
+    // минимальный сброс к исходным значениям разметки
+    window.location.reload();
+  });
+
+  // initial render
+  render();
+</script>
+</body>
+</html>
